@@ -24,6 +24,14 @@ assert(bags.state == "normal", "an unknown state is normal")
 local canvas, slots = hearth:Widget("slots", { name = "Slots", width = 60 })
 assert(canvas and slots.kind == "widget", "a widget gives a frame to draw into")
 assert(hearth:Item("bags") == bags, "same id, same item")
+-- a widget is on the bar while its module keeps the canvas shown (its own flag), whatever the bar does around it
+local canvasShown = true
+rawset(canvas, "IsShown", function() return canvasShown end)
+Deadbeat.Refresh() Deadbeat.Refresh()
+assert(ns.Items.visible(slots), "a shown widget stays on the bar across redraws")
+canvasShown = false
+assert(not ns.Items.visible(slots), "the module hides its widget")
+canvasShown = true
 
 local clicked, shown
 hearth:Tooltip(function(tip, it, shift) tip:AddLine("tip for " .. it.id) end)
