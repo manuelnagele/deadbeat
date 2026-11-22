@@ -41,6 +41,8 @@ end
 luajit tests/smoke.lua      # the hub against a stubbed WoW API
 luajit tests/broker.lua     # the LibDataBroker bridge
 ```
+The tests use the shared harness from [deadbeat-spec](https://github.com/manuelnagele/deadbeat-spec): clone it next to
+this repo (`../deadbeat-spec`) or point `HARNESS` at its `harness/wowstub.lua`.
 Releases: push a tag `vX.Y.Z` matching the TOC's version; CI packages the zip. `deploy/` is the author's Linux setup
 that keeps a game install in sync with this repo (optional).
 
