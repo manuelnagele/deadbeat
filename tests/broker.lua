@@ -24,7 +24,7 @@ newObject("DBM", { type = "launcher", icon = "dbm", OnClick = function(_, b) cli
                    OnTooltipShow = function(tip) tip:AddLine("DBM tip") end })
 
 local ns = {}
-for _, f in ipairs({ "Deadbeat/Kit.lua", "Deadbeat/Deadbeat.lua", "Deadbeat/Settings.lua", "Deadbeat/Broker.lua" }) do
+for _, f in ipairs({ "Deadbeat/Kit.lua", "Deadbeat/Deadbeat.lua", "Deadbeat/Items.lua", "Deadbeat/Settings.lua", "Deadbeat/Broker.lua", "Deadbeat/Edit.lua" }) do
     assert(loadfile(f))("Deadbeat", ns)
 end
 local events = W.frames[#W.frames]                  -- Deadbeat's event frame (the bar's frames come after it)
@@ -57,8 +57,15 @@ DeadbeatDB.ldb.Bags = { pin = true }
 ns.Broker.scan()
 Deadbeat.OpenSettings("LDB")
 assert(DeadbeatSettings, "LDB settings page")
+local bagItem, dbmItem = ns.Broker.pinned("Bags"), ns.Broker.pinned("DBM")
+assert(bagItem and ns.Items.shown(bagItem) and bagItem.value == "12/80", "a pinned object is an item on the bar")
+assert(dbmItem and not ns.Items.shown(dbmItem), "an unpinned object waits on the shelf")
+ns.Items.setShown(dbmItem, true)
+dbmItem.frame:_script("OnClick", "RightButton")
+assert(clicked == "RightButton", "right-click goes to the LDB object (its own menu)")
 bag.text = "11/80"
 callbacks.LibDataBroker_AttributeChanged("x", "Bags", "text", "11/80", bag)
+assert(bagItem.value == "11/80", "the item follows the object's text")
 
 -- the minimap switch: show DBM's button again
 DeadbeatDB.ldb.DBM.minimap = "show"

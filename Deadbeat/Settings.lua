@@ -339,7 +339,7 @@ local function build()
     win:Hide()
 end
 
--- --- the Bar page's grid: each badge × each context, a square to click -------------------------------------
+-- --- the Bar page: layout buttons, and the grid of items × places --------------------------------------------
 
 local CTX_LABEL = { farm = "Farm", raid = "Raid", dungeon = "Dungeon", city = "City", world = "World" }
 
@@ -367,56 +367,51 @@ function Settings.layoutRow(frame, width)
     end
 end
 
+-- every item: on the bar or on the shelf, and the places it shows in
 function Settings.contextGrid(frame, width)
-    local cols, colW, zoneW = Deadbeat.CONTEXTS, 50, 58
-    local x0 = width - #cols * colW - zoneW
-    local zh = K.text(frame, "GameFontHighlightSmall", P.warmGrey)
-    zh:SetPoint("TOP", frame, "TOPLEFT", width - zoneW / 2, -6)
-    zh:SetText("Full-width")
+    local cols, colW, barW = Deadbeat.CONTEXTS, 50, 58
+    local x0 = width - #cols * colW
+    local xb = x0 - barW
+    local bh = K.text(frame, "GameFontHighlightSmall", P.warmGrey)
+    bh:SetPoint("TOP", frame, "TOPLEFT", xb + barW / 2, -6)
+    bh:SetText("On bar")
     for i, ctx in ipairs(cols) do
         local h = K.text(frame, "GameFontHighlightSmall", P.warmGrey)
         h:SetPoint("TOP", frame, "TOPLEFT", x0 + (i - 0.5) * colW, -6)
         h:SetText(CTX_LABEL[ctx])
     end
     local cells = {}
-    for r, badge in ipairs(Deadbeat.Badges()) do
+    local function square(x, y, get, set)
+        local c = CreateFrame("Button", nil, frame)
+        c:SetSize(20, 20)
+        c:SetPoint("TOP", frame, "TOPLEFT", x, y)
+        c.fill = c:CreateTexture(nil, "ARTWORK")
+        c.fill:SetPoint("TOPLEFT", 3, -3)
+        c.fill:SetPoint("BOTTOMRIGHT", -3, 3)
+        K.border(c, true)
+        local hi = c:CreateTexture(nil, "HIGHLIGHT")
+        hi:SetAllPoints()
+        hi:SetColorTexture(1, 1, 1, 0.1)
+        function c.draw()
+            local on = get()
+            local col = on and K.GREEN or P.bronze1
+            c.fill:SetColorTexture(col[1], col[2], col[3], on and 1 or 0.6)
+        end
+        c:SetScript("OnClick", function() set(not get()) c.draw() end)
+        cells[#cells + 1] = c
+    end
+    for r, it in ipairs(Deadbeat.Items()) do
         local y = -26 - (r - 1) * 26
         local name = K.text(frame, "GameFontHighlight", { 0.92, 0.88, 0.80 })
         name:SetPoint("TOPLEFT", 4, y - 4)
-        name:SetWidth(x0 - 16)                                      -- cut with "…" before the switches
+        name:SetWidth(xb - 12)                                      -- cut with "…" before the switches
         name:SetJustifyH("LEFT")
-        name:SetText((badge.opts.label or badge.opts.id) .. "  |cff8f8275" .. badge.module.name .. "|r")
+        name:SetText(it.name .. "  |cff8f8275" .. it.module.name .. "|r")
+        square(xb + barW / 2, y, function() return ns.Items.shown(it) end, function(on) ns.Items.setShown(it, on) end)
         for i, ctx in ipairs(cols) do
-            local c = CreateFrame("Button", nil, frame)
-            c:SetSize(20, 20)
-            c:SetPoint("TOP", frame, "TOPLEFT", x0 + (i - 0.5) * colW, y)
-            c.fill = c:CreateTexture(nil, "ARTWORK")
-            c.fill:SetPoint("TOPLEFT", 3, -3)
-            c.fill:SetPoint("BOTTOMRIGHT", -3, 3)
-            K.border(c, true)
-            local hi = c:CreateTexture(nil, "HIGHLIGHT")
-            hi:SetAllPoints()
-            hi:SetColorTexture(1, 1, 1, 0.1)
-            function c.draw()
-                local on = Deadbeat.badgeAllowed(badge, ctx)
-                local col = on and K.GREEN or P.bronze1
-                c.fill:SetColorTexture(col[1], col[2], col[3], on and 1 or 0.6)
-            end
-            c:SetScript("OnClick", function()
-                Deadbeat.SetBadgeContext(badge, ctx, not Deadbeat.badgeAllowed(badge, ctx))
-                c.draw()
-            end)
-            cells[#cells + 1] = c
+            square(x0 + (i - 0.5) * colW, y, function() return ns.Items.allowed(it, ctx) end,
+                function(on) ns.Items.setAllowed(it, ctx, on) end)
         end
-        -- the zone a badge sits in when the bar is full-width: right (with the others) or centre
-        local z = button(frame, "Right", zoneW - 6, nil)
-        z:SetPoint("TOP", frame, "TOPLEFT", width - zoneW / 2, y)
-        function z.draw() z.text:SetText(Deadbeat.BadgeZone(badge) == "center" and "Centre" or "Right") end
-        z:SetScript("OnClick", function()
-            Deadbeat.SetBadgeZone(badge, Deadbeat.BadgeZone(badge) == "center" and "right" or "center")
-            z.draw()
-        end)
-        cells[#cells + 1] = z
     end
     function frame.drawGrid() for _, c in ipairs(cells) do c.draw() end end
 end
