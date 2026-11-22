@@ -442,11 +442,12 @@ local function buildOverflow()
         menu:Show()
     end
     b:SetScript("OnClick", function() if menu:IsShown() then menu:Hide() else open() end end)
+    local away = 0
     menu:SetScript("OnUpdate", function(self, elapsed)
         local over = (self.IsMouseOver and self:IsMouseOver()) or (bar.IsMouseOver and bar:IsMouseOver())
-        if over then self.away = 0 return end
-        self.away = (self.away or 0) + (elapsed or 0)
-        if self.away > 0.6 then self.away = 0 self:Hide() end
+        if over then away = 0 return end
+        away = away + (elapsed or 0)
+        if away > 0.6 then away = 0 self:Hide() end
     end)
     b:Hide()
     overflow.button = b
