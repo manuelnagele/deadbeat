@@ -1,5 +1,5 @@
 -- luajit tests/smoke.lua: Deadbeat against a stubbed WoW API, with two fake modules.
-local W = dofile("tests/wowstub.lua")
+local W = dofile(os.getenv("HARNESS") or "../deadbeat-spec/harness/wowstub.lua")   -- the shared harness
 local ns = {}
 for _, file in ipairs({ "Deadbeat/Kit.lua", "Deadbeat/Deadbeat.lua", "Deadbeat/Settings.lua", "Deadbeat/Broker.lua" }) do assert(loadfile(file))("Deadbeat", ns) end
 local events = W.frames[#W.frames]

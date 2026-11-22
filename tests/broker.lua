@@ -1,5 +1,5 @@
 -- luajit tests/broker.lua: the LibDataBroker bridge with a fake LDB and LibDBIcon.
-local W = dofile("tests/wowstub.lua")
+local W = dofile(os.getenv("HARNESS") or "../deadbeat-spec/harness/wowstub.lua")   -- the shared harness
 
 -- a fake LibStub with LibDataBroker-1.1 and LibDBIcon-1.0
 local objs, callbacks, hidden, shown = {}, {}, {}, {}
