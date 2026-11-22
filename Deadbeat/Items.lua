@@ -149,9 +149,18 @@ local function makeFrame(it, opts)
         c:SetSize(opts.width or 40, 14)
         c:SetPoint("LEFT")
         c.item = it
-        -- the module shows or hides its canvas: lay out again (not while the bar itself is hiding and showing frames)
-        c:HookScript("OnShow", function() if not Items.rendering then Items.render() end end)
-        c:HookScript("OnHide", function() if not Items.rendering then Items.render() end end)
+        -- The module shows or hides its canvas: lay out again, once, on the next frame. We follow its Show/Hide calls,
+        -- not OnShow/OnHide: those also fire when the bar hides the item frame around the canvas, the game may
+        -- deliver them after a layout (2.0.1 chased them forever and hung the loading screen), and they don't fire at
+        -- all when the module shows a canvas whose item frame is hidden (it would never come back).
+        for _, method in ipairs({ "Show", "Hide", "SetShown" }) do
+            local orig = c[method]
+            c[method] = function(self, ...)
+                local was = self:IsShown()
+                orig(self, ...)
+                if self:IsShown() ~= was then Items.soon() end
+            end
+        end
         it.canvas = c
     else
         f.icon = f:CreateTexture(nil, "ARTWORK")
@@ -224,6 +233,8 @@ local function divider(i, x)
 end
 
 -- one group's items from x (left to right); returns the x after it, and the group's span
+local placed = {}                    -- the items this layout puts on the bar
+
 local function placeGroup(m, list, x)
     local left = x
     for i, it in ipairs(list) do
@@ -231,7 +242,7 @@ local function placeGroup(m, list, x)
         it.frame:SetWidth(w)
         it.frame:ClearAllPoints()
         it.frame:SetPoint("LEFT", bar, "LEFT", x, 0)
-        it.frame:Show()
+        placed[it] = true
         x = x + w + (i < #list and GAP or 0)
     end
     m.span = { left, x }
@@ -271,6 +282,13 @@ local function placeSystem()
     end
 end
 
+-- one layout on the next frame, however many times it's asked for
+function Items.soon()
+    if Items.pending then return end
+    Items.pending = true
+    C_Timer.After(0, function() Items.pending = false Items.render() end)
+end
+
 function Items.render()
     if not bar or not db() or Items.rendering then return end
     Items.rendering = true
@@ -280,7 +298,7 @@ function Items.render()
 end
 
 function Items.layout()
-    for _, it in ipairs(all) do it.frame:Hide() end
+    for k in pairs(placed) do placed[k] = nil end
     for _, d in ipairs(dividers) do d:Hide() end
     overflow.items = {}
     local groups = {}
@@ -336,6 +354,11 @@ function Items.layout()
             right = right - w
             if gi > 1 then nd = nd + 1 divider(nd, right - DIV - 1) right = right - 2 * DIV - 1 end
         end
+    end
+    -- change only what changed: a frame shown or hidden for nothing sends events its widget would answer
+    for _, it in ipairs(all) do
+        local want = placed[it] == true
+        if want ~= (it.frame:IsShown() == true) then it.frame:SetShown(want) end
     end
     placeSystem()
     if ns.Edit and ns.Edit.active() then ns.Edit.redraw() end

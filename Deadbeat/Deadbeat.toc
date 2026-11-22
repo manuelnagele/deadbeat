@@ -2,7 +2,7 @@
 ## Title: Deadbeat
 ## Notes: One neat bar every addon can sit on: modules, LibDataBroker launchers, one settings console.
 ## Author: Manuel Nagele
-## Version: 2.0.1
+## Version: 2.0.2
 ## SavedVariables: DeadbeatDB
 
 Kit.lua
