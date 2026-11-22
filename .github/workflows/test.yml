@@ -1,0 +1,17 @@
+name: test
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  lua:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install LuaJIT
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq luajit
+      - name: Smoke test
+        run: luajit tests/smoke.lua
+      - name: LDB bridge
+        run: luajit tests/broker.lua
