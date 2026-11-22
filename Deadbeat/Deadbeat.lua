@@ -13,7 +13,7 @@
 --   Deadbeat.kit · Deadbeat.Context() · Deadbeat.Layout() · Deadbeat.OpenSettings(title)
 local ADDON, ns = ...
 local K = ns.kit
-local VERSION = "2.0.1"
+local VERSION = "2.0.2"
 local SPEC = "2.0"                 -- the spec version this hub implements (deadbeat-spec/spec.md)
 
 Deadbeat = { kit = K, version = VERSION, SPEC = SPEC }

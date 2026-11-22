@@ -38,3 +38,5 @@ jobs:
         run: HARNESS=deadbeat-spec/harness/wowstub.lua luajit tests/smoke.lua
       - name: LDB bridge
         run: HARNESS=deadbeat-spec/harness/wowstub.lua luajit tests/broker.lua
+      - name: The bar settles (no layout that chases itself)
+        run: HARNESS=deadbeat-spec/harness/wowstub.lua luajit tests/settle.lua
