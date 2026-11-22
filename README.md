@@ -7,6 +7,9 @@ the launchers of the addons you already use.
 ## For players
 
 - **One bar**, compact in the top middle or full-width on the top or bottom edge (gear → Bar → Layout).
+- **Items in groups:** each addon's items sit together, a thin divider between addons. Hover for its details,
+  click for its action, right-click for its settings.
+- **Arrange it yourself:** right-click the gear (or gear → Edit bar) and drag; hidden items wait on the shelf.
 - **It adapts** to where you are: farming, raid, dungeon, city, open world. Each badge can be switched per place
   (gear → Bar → What shows where).
 - **Your other addons** that offer a LibDataBroker launcher or data source (DBM, Questie, AtlasLoot, OpenMap, WIM,
@@ -20,17 +23,20 @@ Install: copy the `Deadbeat` folder into `World of Warcraft/_forever_/Interface/
 
 ## For addon authors
 
-Making your addon a module takes a few lines: register, put a field, a badge or a tooltip section on the bar, and add
-a settings page. Addons with an LDB data object show up without any code.
+Making your addon a module takes a few lines: register, offer a few items (an icon and a short value each), a tooltip,
+a click and a settings page. The player arranges them. Addons with an LDB data object show up without any code.
 
 ```lua
-if Deadbeat then
-    local m = Deadbeat.Register("MyAddon", 70, { spec = "1.0" })
-    m:Set("label", "Hello", 5)
-    m:Section(function(tip) tip:AddLine("MyAddon") end)
+if Deadbeat and Deadbeat.SPEC >= "2.0" then
+    local m = Deadbeat.Register("MyAddon", { icon = "Interface\\Icons\\INV_Misc_Rune_01", spec = "2.0" })
+    local score = m:Item("score", { name = "Score", icon = "Interface\\Icons\\INV_Misc_Coin_01" })
+    score:Set("42", "good")
+    m:Tooltip(function(tip, item) tip:AddLine("  the details") end)
+    m:Click(function() print("hi") end, "say hi")
 end
 ```
 
+- **The design language:** [deadbeat-spec/DESIGN.md](https://github.com/manuelnagele/deadbeat-spec/blob/main/DESIGN.md)
 - **The spec:** [deadbeat-spec/spec.md](https://github.com/manuelnagele/deadbeat-spec/blob/main/spec.md)
 - **Building with an AI assistant:** [deadbeat-spec/AGENTS.md](https://github.com/manuelnagele/deadbeat-spec/blob/main/AGENTS.md)
 - **Test outside the game:** the harness and an example module in [deadbeat-spec](https://github.com/manuelnagele/deadbeat-spec)

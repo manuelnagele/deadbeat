@@ -1,58 +1,34 @@
--- Deadbeat: one bar that every module contributes to (compact or full-width); it draws the bar, its tooltip and the
--- settings console and knows nothing about gold, fish or lockouts. The contract: deadbeat-spec (spec.md, AGENTS.md).
+-- Deadbeat: one bar that every module contributes to (compact or full-width). It draws the bar, its items, tooltips,
+-- the settings console and edit mode, and knows nothing about gold, fish or lockouts. The design language:
+-- deadbeat-spec DESIGN.md; the contract: spec.md (2.0), AGENTS.md.
 --
---   local m = Deadbeat.Register("Hello", 70, { spec = "1.0" }) -- order: left/top first; spec: what you target
---   m:Set("label", "Maraudon · run 3", 20)           -- fields: label, clock, primary, secondary; highest priority wins
---   m:Clear("label")
---   local f = m:Badge(width, { id, label, contexts }) -- a frame on the right of the strip, yours to draw into;
---                                                    -- shown in its contexts (the user can change them in the console)
---   m:Claim("farm", on)                              -- you're farming (Catch while fishing): the bar's context is "farm"
---   m:OnContext(function(ctx) ... end)               -- farm / raid / dungeon / city / world
---   local band = m:Band(priority)                    -- the lower band (sparkline area); highest priority shows
---   m:Section(function(tip, shift) ... end)          -- your part of the tooltip; shift = nerd stats
---   m:OnClick(function(button) ... end)              -- clicks go to the module that owns the label
---   m:Dock(frame)                                    -- a panel stacked under the strip
---   m:Options({ title, icon, rows = { ... } })       -- a page in the settings console (the gear); see Settings.lua
---   Deadbeat.kit                                     -- palette, soft colours, coins, borders, fonts
---   Deadbeat.Layout()                                -- "compact" | "top" | "bottom" (full-width edge bar)
+--   local m = Deadbeat.Register("Hearth", { icon = "...", spec = "2.0" })
+--   local bags = m:Item("bags", { name = "Bags", icon = "...", default = true, contexts = { world = true } })
+--   bags:Set("34", "normal")                         -- value, state: normal | good | warn | bad
+--   local w = m:Widget("slots", { name = "Slots", width = 60 })    -- a frame to draw into
+--   m:Tooltip(function(tip, item, shift) end)        -- lines for an item's tooltip (header and hints are drawn for you)
+--   m:Click(function(item, button) end, "open bags") -- left-click + its hint
+--   m:Options({ title, icon, rows = { ... } })       -- settings pages (right-click opens the first)
+--   m:Claim("farm", on)  m:OnContext(fn)  m:OnLayout(fn)  m:Dock(frame)
+--   Deadbeat.kit · Deadbeat.Context() · Deadbeat.Layout() · Deadbeat.OpenSettings(title)
 local ADDON, ns = ...
 local K = ns.kit
-local VERSION = "1.0.0"
-local SPEC = "1.0"                 -- the spec version this hub implements (deadbeat-spec/spec.md)
+local VERSION = "2.0.0"
+local SPEC = "2.0"                 -- the spec version this hub implements (deadbeat-spec/spec.md)
 
 Deadbeat = { kit = K, version = VERSION, SPEC = SPEC }
 
-local FIELDS = { "label", "clock", "primary", "secondary" }
 local CONTEXTS = { "farm", "raid", "dungeon", "city", "world" }
 Deadbeat.CONTEXTS = CONTEXTS
-local MIN_WIDTH, MAX_WIDTH, STEP = 420, 760, 24
-local COMPACT_H, FULL_H = 34, 22
+local COMPACT_H, FULL_H = 26, 22
 local claims = {}              -- module name -> true while it claims "farm"
 local context = "world"
-local modules = {}             -- in registration order; sorted by order on use
+local modules = {}             -- in registration order
+ns.modules = modules
 local bar, db
 local docked = {}
 
-local function sorted()
-    local list = {}
-    for _, m in ipairs(modules) do list[#list + 1] = m end
-    table.sort(list, function(a, b) return a.order < b.order end)
-    return list
-end
-
--- --- layout --------------------------------------------------------------------
-
-local function owner(field)
-    local best
-    for _, m in ipairs(modules) do
-        local f = m.fields[field]
-        if f and f.value ~= nil and (not best or f.priority > best.fields[field].priority
-                or (f.priority == best.fields[field].priority and m.order < best.order)) then
-            best = m
-        end
-    end
-    return best
-end
+local function render() if ns.Items then ns.Items.render() end end
 
 -- --- context -------------------------------------------------------------------
 
@@ -67,41 +43,6 @@ local function computeContext()
     return "world"
 end
 
--- a badge shows in a context: the user's choice, else the module's default, else everywhere
-local function allowed(badge)
-    local id = badge.opts and badge.opts.id
-    local mine = id and db and db.badgeCtx and db.badgeCtx[id]
-    if mine and mine[context] ~= nil then return mine[context] end
-    local defaults = badge.opts and badge.opts.contexts
-    return not defaults or defaults[context] == true
-end
-Deadbeat.badgeAllowed = function(badge, ctx)
-    local saved = context
-    context = ctx
-    local on = allowed(badge)
-    context = saved
-    return on
-end
-
--- --- layout: one bar, compact (centred, movable) or full-width on the top or bottom edge ----------------
-
-function Deadbeat.Layout() return (db and db.layout) or "compact" end
-local function full() return Deadbeat.Layout() ~= "compact" end
-local function atBottom() return Deadbeat.Layout() == "bottom" end
-Deadbeat.atBottom = atBottom
-
-function Deadbeat.BadgeZone(badge)
-    local id = badge.opts and badge.opts.id
-    return (id and db and db.badgeZone and db.badgeZone[id]) or "right"
-end
-
-function Deadbeat.SetBadgeZone(badge, zone)
-    db.badgeZone = db.badgeZone or {}
-    db.badgeZone[badge.opts.id] = zone ~= "right" and zone or nil
-    Deadbeat.Refresh()
-end
-
-local render, render_compact
 local function updateContext()
     local new = computeContext()
     if new == context then return end
@@ -113,84 +54,13 @@ local function updateContext()
 end
 Deadbeat.UpdateContext = updateContext
 
-function render()
-    if not bar then return end
-    for _, field in ipairs(FIELDS) do
-        local m = owner(field)
-        bar[field]:SetText(m and m.fields[field].value or "")
-    end
-    if not owner("label") then bar.label:SetText("Deadbeat") end
-    -- badges right to left in module order, left of the gear; each only in its contexts. Full-width: a badge may
-    -- sit in the centre zone instead.
-    local wide = full()
-    local y = wide and -4 or -7
-    local x = -30
-    local centre = {}
-    local list = sorted()
-    for i = #list, 1, -1 do
-        for _, b in ipairs(list[i].badges) do
-            local show = b:IsShown() and allowed(b)
-            b.holder:SetShown(show)
-            if show then
-                b.holder:SetSize(b:GetWidth(), b:GetHeight())
-                b.holder:ClearAllPoints()
-                if wide and Deadbeat.BadgeZone(b) == "center" then
-                    table.insert(centre, 1, b)
-                else
-                    b.holder:SetPoint("TOPRIGHT", bar, "TOPRIGHT", x, y)
-                    x = x - b:GetWidth() - 10
-                end
-            end
-        end
-    end
-    if #centre > 0 then
-        local total = -10
-        for _, b in ipairs(centre) do total = total + b:GetWidth() + 10 end
-        local cx = -total / 2
-        for _, b in ipairs(centre) do
-            b.holder:SetPoint("TOPLEFT", bar, "TOP", cx, y)
-            cx = cx + b:GetWidth() + 10
-        end
-    end
-    if wide then
-        -- full-width: fields in the left zone, one after the other; the label may take up to 360 px
-        local full_ = (bar.label.GetUnboundedStringWidth and bar.label:GetUnboundedStringWidth()) or (bar.label:GetStringWidth() or 0)
-        bar.label:SetWidth(math.max(30, math.min(full_ + 2, 360)))
-        bar.secondary:ClearAllPoints()
-        bar.secondary:SetPoint("LEFT", bar.primary, "RIGHT", 14, 0)
-    else
-        render_compact(x)
-    end
-    -- the band: only the highest priority shows
-    local top
-    for _, m in ipairs(modules) do
-        if m.band and m.band.wanted and (not top or m.band.priority > top.band.priority) then top = m end
-    end
-    for _, m in ipairs(modules) do
-        if m.band then m.band:SetShown(m == top) end
-    end
-end
+-- --- layout: one bar, compact (centred, movable) or full-width on the top or bottom edge ----------------
 
--- compact: the bar grows to fit what it has to say, the secondary sits before the badges
-render_compact = function(x)
-    local function w(fs) return fs:GetStringWidth() or 0 end
-    local labelFull = (bar.label.GetUnboundedStringWidth and bar.label:GetUnboundedStringWidth()) or w(bar.label)
-    local needed = 10 + labelFull + 6 + w(bar.clock) + 14 + w(bar.primary) + 8 + w(bar.secondary) + 12 - x + 4
-    -- in 24 px steps, growing at once but shrinking only after a clear drop: a ticking clock ("34:50" → "34:51")
-    -- must not resize the centred bar every second (0.4.0 jittered)
-    local want = math.max(MIN_WIDTH, math.min(MAX_WIDTH, math.ceil(needed / STEP) * STEP))
-    local current = bar:GetWidth() or MIN_WIDTH
-    if want > current or want <= current - 2 * STEP then bar:SetWidth(want) end
-    bar.secondary:ClearAllPoints()
-    bar.secondary:SetPoint("TOPRIGHT", bar, "TOPRIGHT", x - 2, -9)
-    -- the label gets what's left; a long one is cut with "…" instead of running into the numbers
-    local function width(fs) return fs:GetStringWidth() or 0 end
-    local right = -x + 2 + width(bar.secondary) + 12
-    local used = 10 + 6 + width(bar.clock) + 14 + width(bar.primary) + 8
-    local room = (bar:GetWidth() or MIN_WIDTH) - right - used
-    local full_ = (bar.label.GetUnboundedStringWidth and bar.label:GetUnboundedStringWidth()) or width(bar.label)
-    bar.label:SetWidth(math.max(30, math.min(full_ + 2, room)))
-end
+function Deadbeat.Layout() return (db and db.layout) or "compact" end
+local function full() return Deadbeat.Layout() ~= "compact" end
+local function atBottom() return Deadbeat.Layout() == "bottom" end
+Deadbeat.atBottom = atBottom
+ns.full = full
 
 -- the last shown docked panel (or the bar): where things that open from the bar should start
 function Deadbeat.DockEnd()
@@ -222,32 +92,17 @@ local function applyLayout()
     else
         local p = db.point
         if p then bar:SetPoint(p[1], UIParent, p[2], p[3], p[4]) else bar:SetPoint("TOP", UIParent, "TOP", 0, -40) end
-        bar:SetSize(MIN_WIDTH, COMPACT_H)
+        bar:SetHeight(COMPACT_H)
     end
     bar.border:SetShown(not wide)
     bar.edge:SetShown(wide)
     bar.edge:ClearAllPoints()
     bar.edge:SetPoint(bottom and "TOPLEFT" or "BOTTOMLEFT")
     bar.edge:SetPoint(bottom and "TOPRIGHT" or "BOTTOMRIGHT")
-    local ty = wide and -6 or -9
-    bar.label:ClearAllPoints()
-    bar.label:SetPoint("TOPLEFT", 10, ty)
-    bar.gear:ClearAllPoints()
-    bar.gear:SetPoint("TOPRIGHT", -8, wide and -3 or -6)
-    -- the band: the lower 9 px of the compact bar; a 3 px line along the inner edge of a full-width one
-    bar.band:ClearAllPoints()
-    if wide then
-        bar.band:SetPoint(bottom and "TOPLEFT" or "BOTTOMLEFT", 0, bottom and -1 or 1)
-        bar.band:SetPoint(bottom and "TOPRIGHT" or "BOTTOMRIGHT", 0, bottom and -1 or 1)
-        bar.band:SetHeight(3)
-    else
-        bar.band:SetPoint("BOTTOMLEFT", 8, 5)
-        bar.band:SetPoint("BOTTOMRIGHT", -8, 5)
-        bar.band:SetHeight(9)
-    end
     render()
     relayoutDock()
 end
+ns.applyLayout = applyLayout
 
 function Deadbeat.SetLayout(layout)
     db.layout = layout ~= "compact" and layout or nil
@@ -255,38 +110,22 @@ function Deadbeat.SetLayout(layout)
     for _, m in ipairs(modules) do if m.layoutFn then pcall(m.layoutFn, Deadbeat.Layout()) end end
 end
 
--- --- the tooltip ---------------------------------------------------------------
-
-local function showTooltip(self)
-    if ns.Broker and ns.Broker.trayOpen() then return end       -- the tray drops down where the tooltip would
-    local tip = GameTooltip
-    if atBottom() then tip:SetOwner(self, "ANCHOR_TOP", 0, 4) else tip:SetOwner(self, "ANCHOR_BOTTOM", 0, -4) end
-    local shift = IsShiftKeyDown()
-    local first = true
-    for _, m in ipairs(sorted()) do
-        if m.section then
-            local before = tip:NumLines()
-            if not first then tip:AddLine(" ") end
-            local ok, err = pcall(m.section, tip, shift)
-            if not ok then tip:AddLine("|cffff4040" .. m.name .. ": " .. tostring(err) .. "|r") end
-            if tip:NumLines() > before + (first and 0 or 1) then first = false end
-        end
-    end
-    local g = K.P.warmGrey
-    if not first then tip:AddLine(" ") end
-    tip:AddLine(shift and "Shift-drag: move  ·  /deadbeat" or "Shift: nerd stats", g[1], g[2], g[3])
-    tip:Show()
-end
-
-function Deadbeat.RefreshTooltip()
-    if bar and GameTooltip:IsOwned(bar) then showTooltip(bar) end
-end
-
 -- --- the bar -------------------------------------------------------------------
+
+local function startMove()
+    if IsShiftKeyDown() and not full() and not db.locked then bar:StartMoving() end
+end
+local function stopMove()
+    bar:StopMovingOrSizing()
+    if full() then return end
+    local point, _, rel, x, y = bar:GetPoint()
+    db.point = { point, rel, x, y }
+end
+ns.startMove, ns.stopMove = startMove, stopMove
 
 local function build()
     bar = CreateFrame("Button", "DeadbeatBar", UIParent)
-    bar:SetSize(MIN_WIDTH, COMPACT_H)
+    bar:SetSize(200, COMPACT_H)
     K.ground(bar)
     bar.border = K.border(bar, true)
     bar.edge = bar:CreateTexture(nil, "BORDER")                 -- full-width: a bronze line on the inner edge
@@ -295,38 +134,15 @@ local function build()
     bar:SetMovable(true)
     bar:SetClampedToScreen(true)
     bar:RegisterForDrag("LeftButton")
-    bar:RegisterForClicks("AnyUp")
-    bar:SetScript("OnDragStart", function(self)
-        if IsShiftKeyDown() and not full() and not db.locked then self:StartMoving() end
-    end)
-    bar:SetScript("OnDragStop", function(self)
-        self:StopMovingOrSizing()
-        local point, _, rel, x, y = self:GetPoint()
-        db.point = { point, rel, x, y }
-    end)
-    bar:SetScript("OnClick", function(_, button)
-        local m = owner("label")
-        if m and m.click then m.click(button) render() Deadbeat.RefreshTooltip() end
-    end)
-    bar:SetScript("OnEnter", showTooltip)
-    bar:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    bar:SetScript("OnDragStart", startMove)
+    bar:SetScript("OnDragStop", stopMove)
 
+    -- the gear: every module's settings (left-click), edit mode (right-click)
     local P = K.P
-    bar.label = K.text(bar, "GameFontNormalSmall", P.bronze4)
-    bar.label:SetPoint("TOPLEFT", 10, -9)
-    bar.label:SetJustifyH("LEFT")
-    bar.clock = K.text(bar, "GameFontHighlightSmall", P.warmGrey)
-    bar.clock:SetPoint("LEFT", bar.label, "RIGHT", 6, 0)
-    bar.primary = K.text(bar, "GameFontHighlight")
-    bar.primary:SetPoint("LEFT", bar.clock, "RIGHT", 14, 0)
-    bar.secondary = K.text(bar, "GameFontHighlightSmall")
-    bar.secondary:SetJustifyH("RIGHT")
-
-    -- the gear: every module's settings
     bar.gear = CreateFrame("Button", "DeadbeatGear", bar)
     bar.gear:SetSize(16, 16)
-    bar.gear:SetPoint("TOPRIGHT", -8, -6)
     bar.gear:SetFrameLevel(bar:GetFrameLevel() + 5)
+    bar.gear:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     local gear = bar.gear:CreateTexture(nil, "ARTWORK")
     gear:SetAllPoints()
     gear:SetTexture("Interface\\Buttons\\UI-OptionsButton")
@@ -335,20 +151,24 @@ local function build()
     bar.gear:SetScript("OnEnter", function(self)
         self:SetAlpha(1)
         if atBottom() then GameTooltip:SetOwner(self, "ANCHOR_TOP", 0, 4) else GameTooltip:SetOwner(self, "ANCHOR_BOTTOM", 0, -4) end
-        GameTooltip:AddLine("Settings", P.bronze4[1], P.bronze4[2], P.bronze4[3])
+        GameTooltip:AddLine("Deadbeat", P.bronze4[1], P.bronze4[2], P.bronze4[3])
+        GameTooltip:AddLine("Click: settings  ·  Right-click: edit the bar", P.warmGrey[1], P.warmGrey[2], P.warmGrey[3])
         GameTooltip:Show()
     end)
     bar.gear:SetScript("OnLeave", function(self) self:SetAlpha(0.5) GameTooltip:Hide() end)
-    bar.gear:SetScript("OnClick", function() Deadbeat.ToggleSettings() end)
-
-    bar.band = CreateFrame("Frame", nil, bar)
-    bar.band:SetPoint("BOTTOMLEFT", 8, 5)
-    bar.band:SetPoint("BOTTOMRIGHT", -8, 5)
-    bar.band:SetHeight(9)
+    bar.gear:SetScript("OnClick", function(_, button)
+        if button == "RightButton" then
+            if ns.Edit then ns.Edit.toggle() end
+        else
+            Deadbeat.ToggleSettings()
+        end
+    end)
 
     bar:SetScale(db.scale or 1)
     bar:SetShown(db.shown ~= false)
     Deadbeat.frame = bar
+    ns.bar = bar
+    if ns.Items then ns.Items.build(bar) end
     applyLayout()
 end
 
@@ -356,31 +176,18 @@ end
 
 local Module = {}
 Module.__index = Module
+ns.Module = Module
 
-function Module:Set(field, value, priority)
-    self.fields[field] = { value = value, priority = priority or 0 }
-    render()
+function Module:Item(id, opts) return ns.Items.new(self, id, opts or {}, "value") end
+
+-- A frame (width × 14) to draw into; show and hide it as you like.
+function Module:Widget(id, opts)
+    local item = ns.Items.new(self, id, opts or {}, "widget")
+    return item.canvas, item
 end
 
-function Module:Clear(field)
-    self.fields[field] = nil
-    render()
-end
-
--- The module draws into f and shows/hides it as it likes; Deadbeat shows f's holder only in f's contexts.
-function Module:Badge(width, opts)
-    local holder = CreateFrame("Frame", nil, bar)
-    holder:SetSize(width or 40, 14)
-    local f = CreateFrame("Frame", nil, holder)
-    f:SetSize(width or 40, 14)
-    f:SetPoint("TOPRIGHT", holder, "TOPRIGHT")            -- the module may resize f; render sizes the holder to it
-    f.holder, f.opts, f.module = holder, opts or false, self   -- false, not nil: a missing field
-    f:HookScript("OnShow", function() render() end)
-    f:HookScript("OnHide", function() render() end)
-    self.badges[#self.badges + 1] = f
-    render()
-    return f
-end
+function Module:Tooltip(fn) self.tooltip = fn end
+function Module:Click(fn, hint) self.click, self.clickHint = fn, hint end
 
 function Module:Claim(what, on)
     if what ~= "farm" then return end
@@ -391,43 +198,10 @@ end
 function Module:OnContext(fn) self.contextFn = fn end
 function Module:OnLayout(fn) self.layoutFn = fn end
 
--- every badge with an id, for the console's grid
-function Deadbeat.Badges()
-    local out = {}
-    for _, m in ipairs(sorted()) do
-        for _, b in ipairs(m.badges) do if b.opts and b.opts.id then out[#out + 1] = b end end
-    end
-    return out
+function Module:Options(page)
+    self.pages[#self.pages + 1] = page.title
+    ns.Settings.add(self, page)
 end
-
-function Deadbeat.SetBadgeContext(badge, ctx, on)
-    db.badgeCtx = db.badgeCtx or {}
-    db.badgeCtx[badge.opts.id] = db.badgeCtx[badge.opts.id] or {}
-    db.badgeCtx[badge.opts.id][ctx] = on
-    render()
-end
-
-function Module:Band(priority)
-    if not self.band then
-        self.band = CreateFrame("Frame", nil, bar.band)
-        self.band:SetAllPoints(bar.band)
-    end
-    self.band.priority = priority or 0
-    self.band.wanted = true
-    render()
-    return self.band
-end
-
-function Module:BandPriority(priority, wanted)
-    if not self.band then return end
-    self.band.priority = priority or self.band.priority
-    if wanted ~= nil then self.band.wanted = wanted end
-    render()
-end
-
-function Module:Section(fn) self.section = fn end
-function Module:Options(page) ns.Settings.add(self, page) end
-function Module:OnClick(fn) self.click = fn end
 
 function Module:Dock(frame)
     docked[#docked + 1] = frame
@@ -435,6 +209,63 @@ function Module:Dock(frame)
     frame:HookScript("OnHide", relayoutDock)
     relayoutDock()
 end
+
+-- --- 1.x, kept working one more major (spec 2.0 §legacy) --------------------------------------------------
+
+local LEGACY_FIELDS = { "label", "clock", "primary", "secondary" }
+
+local function legacyNote(m)
+    if m.legacyNoted then return end
+    m.legacyNoted = true
+    DEFAULT_CHAT_FRAME:AddMessage(("|cffd8a446Deadbeat|r: %s uses the old (1.x) API; it works, but should move to items")
+        :format(m.name))
+end
+
+local function legacyDraw(m)
+    if not m.legacyItem then m.legacyItem = ns.Items.new(m, "legacy", { name = m.name, default = true }, "value") end
+    local parts = {}
+    for _, f in ipairs(LEGACY_FIELDS) do
+        local v = m.fields[f] and m.fields[f].value
+        if v and v ~= "" then parts[#parts + 1] = v end
+    end
+    if #parts > 0 then m.legacyItem:Set(table.concat(parts, "  ·  ")) m.legacyItem:Show() else m.legacyItem:Hide() end
+end
+
+function Module:Set(field, value, priority)
+    legacyNote(self)
+    self.fields[field] = { value = value, priority = priority or 0 }
+    legacyDraw(self)
+end
+
+function Module:Clear(field)
+    self.fields[field] = nil
+    if self.legacyItem or next(self.fields) then legacyDraw(self) end
+end
+
+function Module:Badge(width, opts)
+    legacyNote(self)
+    opts = opts or {}
+    self.badgeCount = (self.badgeCount or 0) + 1
+    local id = opts.id and opts.id:gsub("^[^.]*%.", "") or ("badge" .. self.badgeCount)
+    local canvas = self:Widget(id, { name = opts.label or id, width = width, contexts = opts.contexts, default = true })
+    return canvas
+end
+
+function Module:Section(fn)
+    legacyNote(self)
+    self.tooltip = function(tip, _, shift) fn(tip, shift) end
+end
+
+function Module:OnClick(fn) self.click = function(_, button) fn(button) end end
+
+function Module:Band()
+    local f = CreateFrame("Frame", nil, UIParent)        -- 2.0 has no band: draw into nothing
+    f:Hide()
+    return f
+end
+function Module:BandPriority() end
+
+-- --- registering -----------------------------------------------------------------
 
 -- a module targeting a newer spec major than this hub: say so once, keep going
 local function checkSpec(name, wanted)
@@ -445,15 +276,20 @@ local function checkSpec(name, wanted)
     end
 end
 
-function Deadbeat.Register(name, order, opts)
+-- Register(name, { icon, spec }) — or 1.x: Register(name, order, { spec })
+function Deadbeat.Register(name, a, b)
     for _, m in ipairs(modules) do if m.name == name then return m end end
-    if opts and opts.spec then checkSpec(name, opts.spec) end
-    local m = setmetatable({ name = name, order = order or 50, fields = {}, badges = {} }, Module)
+    local opts = type(a) == "table" and a or b or {}
+    if opts.spec then checkSpec(name, opts.spec) end
+    local m = setmetatable({ name = name, icon = opts.icon, order = type(a) == "number" and a or nil, items = {},
+                             byId = {}, fields = {}, pages = {} }, Module)
     modules[#modules + 1] = m
     return m
 end
 
 function Deadbeat.Refresh() render() end
+
+function Deadbeat.RefreshTooltip() if ns.Items then ns.Items.refreshTooltip() end end
 
 -- --- events & commands ---------------------------------------------------------
 
@@ -466,10 +302,14 @@ f:SetScript("OnEvent", function(_, event, name)
     if event == "ADDON_LOADED" and name == ADDON then
         DeadbeatDB = DeadbeatDB or {}
         db = DeadbeatDB
+        ns.db = db
         build()
     elseif event == "PLAYER_LOGIN" then
-        Deadbeat.Register("Bar", 0):Options({ title = "Bar", icon = "Interface\\Icons\\INV_Misc_Coin_01", rows = {
+        Deadbeat.Register("Bar", { icon = "Interface\\Icons\\INV_Misc_Coin_01" }):Options({ title = "Bar",
+            icon = "Interface\\Icons\\INV_Misc_Coin_01", rows = {
             { kind = "header", label = "The bar" },
+            { kind = "button", label = "Arrange it: drag groups and items, hide and show them", text = "Edit bar",
+              run = function() if ns.Edit then ns.Edit.toggle(true) end end },
             { kind = "toggle", label = "Show the bar", get = function() return bar:IsShown() end,
               set = function(on) bar:SetShown(on) db.shown = on end },
             { kind = "slider", label = "Size", min = 0.5, max = 2, step = 0.05, fmt = "%.2f",
@@ -485,11 +325,10 @@ f:SetScript("OnEvent", function(_, event, name)
                   applyLayout()
               end },
             { kind = "header", label = "What shows where" },
-            { kind = "note", label = "The bar adapts to where you are. Switch each badge on or off per place." },
-            { kind = "custom", height = function() return 30 + 26 * #Deadbeat.Badges() end,
+            { kind = "note", label = "The bar adapts to where you are. Switch each item on or off per place." },
+            { kind = "custom", height = function() return 30 + 26 * #Deadbeat.Items() end,
               build = function(frame, width) ns.Settings.contextGrid(frame, width) end,
               show = function(frame) if frame.drawGrid then frame.drawGrid() end end },
-            { kind = "note", label = "Each addon of the family adds its own page here." },
         } })
         if ns.Broker then ns.Broker.build(db) end
         render()
@@ -509,18 +348,19 @@ SlashCmdList.DEADBEAT = function(msg)
         bar:SetShown(true)
         db.shown = true
         Deadbeat.ToggleSettings()
+    elseif cmd == "edit" then
+        if ns.Edit then ns.Edit.toggle() end
     elseif cmd == "reset" then
         db.point, db.scale = nil, nil
-        bar:ClearAllPoints()
-        bar:SetPoint("TOP", UIParent, "TOP", 0, -40)
         bar:SetScale(1)
+        applyLayout()
     elseif cmd == "scale" and tonumber(arg) then
         db.scale = math.max(0.5, math.min(2, tonumber(arg)))
         bar:SetScale(db.scale)
     else
         local names = {}
-        for _, m in ipairs(sorted()) do names[#names + 1] = m.name end
-        DEFAULT_CHAT_FRAME:AddMessage(("|cffd8a446Deadbeat|r %s · modules: %s · /deadbeat (show/hide) · reset · scale <n>")
+        for _, m in ipairs(modules) do names[#names + 1] = m.name end
+        DEFAULT_CHAT_FRAME:AddMessage(("|cffd8a446Deadbeat|r %s · modules: %s · /deadbeat (settings) · edit · reset · scale <n>")
             :format(VERSION, #names > 0 and table.concat(names, ", ") or "none"))
     end
 end

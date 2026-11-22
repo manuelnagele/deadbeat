@@ -1,6 +1,7 @@
 -- Deadbeat's LibDataBroker bridge: every LDB data object (launchers and data sources from other addons) on the bar
--- without changes to those addons. Launchers sit in one tray badge that drops down a grid of icons; any object can be
--- pinned as its own badge; their LibDBIcon minimap buttons can be hidden. Spec: deadbeat-spec spec.md §4.11 (draft).
+-- without changes to those addons. Launchers sit in the tray (a system item before the gear) that drops down a grid of
+-- icons; every object is also an item of the "LDB" group, on the shelf until pinned; their LibDBIcon minimap buttons
+-- can be hidden. Spec: deadbeat-spec spec.md (LibDataBroker bridge).
 local _, ns = ...
 local K = ns.kit
 local P = K.P
@@ -9,7 +10,7 @@ ns.Broker = Broker
 
 local LDB                            -- LibDataBroker-1.1, when some addon brought it
 local objects, names = {}, {}        -- name -> data object; sorted names
-local pinned = {}                    -- name -> badge
+local pinned = {}                    -- name -> its item
 local m, tray, trayBadge, db
 local COLS, CELL = 4, 68
 
@@ -72,33 +73,28 @@ function Broker.hasMinimap(name)
     return icons and icons.IsRegistered and icons:IsRegistered(name) or false
 end
 
--- --- pinned badges ------------------------------------------------------------------------------------
+-- --- pinned objects: items of the "LDB" group ------------------------------------------------------------
+
+local function objText(obj)
+    return obj.text or (obj.value and (tostring(obj.value) .. (obj.suffix or ""))) or ""
+end
 
 local function drawPin(name)
-    local b, obj = pinned[name], objects[name]
-    if not (b and obj) then return end
-    icon(b.icon, obj)
-    local text = obj.text or (obj.value and (tostring(obj.value) .. (obj.suffix or ""))) or ""
-    b.text:SetText(text)
-    b:SetWidth(15 + (text ~= "" and ((b.text:GetStringWidth() or 20) + 2) or 0))
+    local it, obj = pinned[name], objects[name]
+    if not (it and obj) then return end
+    it:SetIcon(obj.icon)
+    it:Set(obj.type == "data source" and objText(obj) or "")
 end
 
+-- an object's item exists from the start (on the shelf); "pinned" = on the bar
 local function pin(name)
     if not pinned[name] then
-        local b = m:Badge(16, { id = "ldb." .. name, label = title(name, objects[name]) .. " (LDB)" })
-        b.icon = b:CreateTexture(nil, "ARTWORK")
-        b.icon:SetSize(13, 13)
-        b.icon:SetPoint("LEFT")
-        b.text = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        b.text:SetPoint("LEFT", 15, 0)
-        local hit = CreateFrame("Button", nil, b)
-        hit:SetAllPoints()
-        wire(hit, name)
-        pinned[name] = b
+        pinned[name] = m:Item(name, { name = title(name, objects[name]), icon = objects[name].icon, default = false })
     end
-    pinned[name]:SetShown(isPinned(name))
+    if ns.Items.shown(pinned[name]) ~= isPinned(name) then ns.Items.setShown(pinned[name], isPinned(name)) end
     drawPin(name)
 end
+Broker.pinned = function(name) return pinned[name] end
 
 -- --- the tray --------------------------------------------------------------------------------------------
 
@@ -140,10 +136,15 @@ local function layoutTray()
     local rows = math.max(1, math.ceil(#list / COLS))
     tray:SetSize(16 + math.min(#list, COLS) * CELL, 16 + rows * 52)
     trayBadge:SetShown(#list > 0)
+    Deadbeat.Refresh()
 end
 
+-- the tray: a system item at the bar's right end, before the gear
 local function buildTray()
-    trayBadge = m:Badge(14, { id = "ldb.tray", label = "Addon launchers (LDB tray)" })
+    trayBadge = CreateFrame("Frame", nil, Deadbeat.frame)
+    trayBadge:SetSize(14, 14)
+    trayBadge:SetFrameLevel(Deadbeat.frame:GetFrameLevel() + 3)
+    ns.tray = trayBadge
     -- a 3 × 3 grid of small bronze squares: "the other addons"
     for i = 0, 8 do
         local sq = trayBadge:CreateTexture(nil, "ARTWORK")
@@ -199,10 +200,10 @@ local function add(name, obj)
     objects[name] = obj
     names[#names + 1] = name
     table.sort(names, function(a, b) return title(a, objects[a]):lower() < title(b, objects[b]):lower() end)
-    if isPinned(name) then pin(name) end
+    pin(name)                                             -- its item: on the bar if pinned, else on the shelf
     minimap(name)
     if tray and tray:IsShown() then layoutTray() end
-    if trayBadge then trayBadge:SetShown(#trayNames() > 0) end
+    if trayBadge then trayBadge:SetShown(#trayNames() > 0) Deadbeat.Refresh() end
 end
 
 local function changed(_, name, key)
@@ -222,6 +223,7 @@ function Broker.scan()
         LDB.RegisterCallback(Broker, "LibDataBroker_AttributeChanged", changed)
     end
     for name, obj in LDB:DataObjectIterator() do add(name, obj) end
+    for _, name in ipairs(names) do pin(name) end            -- settings → items, also for objects seen before
     -- the minimap buttons register late (in their own PLAYER_LOGIN): hide them again a moment later
     C_Timer.After(2, function() for _, n in ipairs(names) do minimap(n) end end)
 end
@@ -261,7 +263,7 @@ local function page(frame, width)
         sw(width - 196, function() return inTray(name) end, function(on)
             settings(name).tray = on
             minimap(name)
-            if trayBadge then trayBadge:SetShown(#trayNames() > 0) end
+            if trayBadge then trayBadge:SetShown(#trayNames() > 0) Deadbeat.Refresh() end
             Deadbeat.Refresh()
         end)
         sw(width - 132, function() return isPinned(name) end, function(on)
@@ -272,7 +274,7 @@ local function page(frame, width)
         end)
         if Broker.hasMinimap(name) then
             sw(width - 58, function() return hideMinimap(name) end, function(on)
-                settings(name).minimap = on and nil or "show"
+                if on then settings(name).minimap = nil else settings(name).minimap = "show" end
                 minimap(name)
             end)
         end
@@ -288,7 +290,25 @@ end
 
 function Broker.build(database)
     db = database
-    m = Deadbeat.Register("LDB", 90)
+    m = Deadbeat.Register("LDB", { icon = "Interface\\Icons\\INV_Misc_Gear_01" })
+    -- LDB objects keep their own behaviour: right-click goes to them (their menus), their tooltip or OnEnter frame
+    m.passRightClick, m.itemOnlyHeader = true, true
+    m.enter = function(it)
+        local obj = objects[it.id]
+        if obj and not obj.OnTooltipShow and obj.OnEnter then pcall(obj.OnEnter, it.frame) return true end
+    end
+    m.leave = function(it)
+        local obj = objects[it.id]
+        if obj and not obj.OnTooltipShow and obj.OnLeave then pcall(obj.OnLeave, it.frame) else GameTooltip:Hide() end
+    end
+    m:Tooltip(function(tip, it)
+        local obj = objects[it.id]
+        if obj and obj.OnTooltipShow then pcall(obj.OnTooltipShow, tip) end
+    end)
+    m:Click(function(it, button)
+        local obj = objects[it.id]
+        if obj and obj.OnClick then pcall(obj.OnClick, it.frame, button) end
+    end)
     buildTray()
     m:Options({ title = "LDB", icon = "Interface\\Icons\\INV_Misc_Gear_01", rows = {
         { kind = "header", label = "Other addons (LibDataBroker)" },
