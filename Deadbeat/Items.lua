@@ -59,7 +59,7 @@ function Items.setLabel(it, on)
 end
 
 function Items.visible(it)
-    return it.wanted and Items.shown(it) and Items.allowed(it, context())
+    return it:IsShown() and Items.shown(it) and Items.allowed(it, context())
 end
 
 -- groups in the player's order; a new module appends at the end
@@ -122,7 +122,12 @@ end
 
 function Item:Show() if self.canvas then self.canvas:Show() else self.wanted = true Items.render() end end
 function Item:Hide() if self.canvas then self.canvas:Hide() else self.wanted = false Items.render() end end
-function Item:IsShown() return self.wanted end
+-- A widget is wanted while its module keeps the canvas shown: the canvas's own flag (IsShown), never its visibility,
+-- which also goes when the bar hides the item frame around it (that once hid Lockout's diamonds for good).
+function Item:IsShown()
+    if self.canvas then return self.canvas:IsShown() == true end
+    return self.wanted
+end
 
 function Item:Width()
     if self.canvas then return math.max(1, self.canvas:GetWidth() or 1) end
@@ -144,8 +149,9 @@ local function makeFrame(it, opts)
         c:SetSize(opts.width or 40, 14)
         c:SetPoint("LEFT")
         c.item = it
-        c:HookScript("OnShow", function() it.wanted = true Items.render() end)
-        c:HookScript("OnHide", function() it.wanted = false Items.render() end)
+        -- the module shows or hides its canvas: lay out again (not while the bar itself is hiding and showing frames)
+        c:HookScript("OnShow", function() if not Items.rendering then Items.render() end end)
+        c:HookScript("OnHide", function() if not Items.rendering then Items.render() end end)
         it.canvas = c
     else
         f.icon = f:CreateTexture(nil, "ARTWORK")
@@ -266,7 +272,14 @@ local function placeSystem()
 end
 
 function Items.render()
-    if not bar or not db() then return end
+    if not bar or not db() or Items.rendering then return end
+    Items.rendering = true
+    local ok, err = pcall(Items.layout)
+    Items.rendering = false
+    if not ok then error(err, 0) end
+end
+
+function Items.layout()
     for _, it in ipairs(all) do it.frame:Hide() end
     for _, d in ipairs(dividers) do d:Hide() end
     overflow.items = {}
